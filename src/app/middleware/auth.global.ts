@@ -9,10 +9,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const authStore = useAuthStore();
   authStore.userData = await authStore.getSession(event);
 
-  const isLoginRoute = to.path === '/login' || to.path === '/login/2fa';
-
-  // skip login pages if already logged in
-  if (isLoginRoute) {
+  // skip login if already logged in
+  if (to.path === '/login') {
     if (authStore.userData?.username) {
       return navigateTo('/', { redirectCode: 302 });
     }

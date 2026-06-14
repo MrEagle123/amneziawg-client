@@ -25,6 +25,7 @@ export const UserLoginSchema = z.object({
   username: username,
   password: password,
   remember: remember,
+  totpCode: totpCode.optional(),
 });
 
 export const UserSetupSchema = z
@@ -56,7 +57,7 @@ export const UserUpdateSchema = z.object({
 
 export const UserUpdatePasswordSchema = z
   .object({
-    currentPassword: password.nullable(),
+    currentPassword: password,
     newPassword: password,
     confirmPassword: password,
   })

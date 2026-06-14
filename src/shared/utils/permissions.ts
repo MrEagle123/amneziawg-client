@@ -47,8 +47,8 @@ type SharedUserType =
 
 export type SharedPublicUser = Pick<
   UserType,
-  'id' | 'username' | 'name' | 'email' | 'totpVerified' | 'oauthProvider'
-> & { role: BrandedNumber; hasPassword: boolean };
+  'id' | 'username' | 'name' | 'email' | 'totpVerified'
+> & { role: BrandedNumber };
 
 type PermissionCheck<Key extends keyof Permissions> =
   | boolean
@@ -144,10 +144,7 @@ export function hasPermissionsWithData<Resource extends keyof Permissions>(
       const isAllowed = hasPermissions(user, resource, action, data);
 
       if (!isAllowed) {
-        throw createError({
-          statusCode: 403,
-          statusMessage: 'Permission denied',
-        });
+        throw new Error('Permission denied');
       }
 
       return isAllowed;

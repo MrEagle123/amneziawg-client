@@ -1,87 +1,62 @@
-FROM docker.io/library/node:krypton-alpine AS build
-WORKDIR /app
+FROM docker.io/library/alpine:3.22 AS build
+WORKDIR /build
 
-# update corepack
-RUN npm install --global corepack@latest
-# Install pnpm
-RUN corepack enable pnpm
+ARG AMNEZIAWG_TOOLS_REPO=https://github.com/amnezia-vpn/amneziawg-tools.git
+ARG AMNEZIAWG_GO_REPO=https://github.com/amnezia-vpn/amneziawg-go.git
 
-# Copy Web UI
-COPY src/package.json src/pnpm-lock.yaml src/pnpm-workspace.yaml ./
-RUN pnpm install
-
-# Build UI
-COPY src ./
-RUN pnpm build
-
-# Build amneziawg-tools
-RUN apk add linux-headers build-base go git && \
-    git clone https://github.com/amnezia-vpn/amneziawg-tools.git && \
-    git clone https://github.com/amnezia-vpn/amneziawg-go && \
-    cd amneziawg-go && \
-    make && \
-    cd ../amneziawg-tools/src && \
-    make && \
-    sed -i 's|\[\[ $proto == -4 \]\] && cmd sysctl -q net\.ipv4\.conf\.all\.src_valid_mark=1|[[ $proto == -4 ]] \&\& [[ $(sysctl -n net.ipv4.conf.all.src_valid_mark) != 1 ]] \&\& cmd sysctl -q net.ipv4.conf.all.src_valid_mark=1|' ./wg-quick/linux.bash
-
-FROM docker.io/library/node:krypton-alpine AS build-libsql
-WORKDIR /app
-RUN npm install --no-save --omit=dev libsql
-
-# Copy build result to a new image.
-# This saves a lot of disk space.
-FROM docker.io/library/node:krypton-alpine
-WORKDIR /app
-
-HEALTHCHECK --interval=1m --timeout=5s --retries=3 CMD /usr/bin/timeout 5s /bin/sh -c "/usr/bin/wg show | /bin/grep -q interface || exit 1"
-
-# Copy build
-COPY --from=build /app/.output /app
-# Copy migrations
-COPY --from=build /app/server/database/migrations /app/server/database/migrations
-# libsql (https://github.com/nitrojs/nitro/issues/3328)
-COPY --from=build-libsql /app/node_modules /app/server/node_modules
-
-# cli
-COPY --from=build /app/cli/cli.sh /usr/local/bin/cli
-RUN chmod +x /usr/local/bin/cli
-# Copy amneziawg-go
-COPY --from=build /app/amneziawg-go/amneziawg-go /usr/bin/amneziawg-go
-RUN chmod +x /usr/bin/amneziawg-go
-# Copy amneziawg-tools
-COPY --from=build /app/amneziawg-tools/src/wg /usr/bin/awg
-COPY --from=build /app/amneziawg-tools/src/wg-quick/linux.bash /usr/bin/awg-quick
-RUN chmod +x /usr/bin/awg /usr/bin/awg-quick
-
-# Install Linux packages
 RUN apk add --no-cache \
-    dpkg \
+    bash \
+    build-base \
+    git \
+    go \
+    linux-headers
+
+RUN git clone --depth 1 "$AMNEZIAWG_GO_REPO" amneziawg-go && \
+    git clone --depth 1 "$AMNEZIAWG_TOOLS_REPO" amneziawg-tools && \
+    make -C amneziawg-go && \
+    make -C amneziawg-tools/src && \
+    sed -i 's|\[\[ $proto == -4 \]\] && cmd sysctl -q net\.ipv4\.conf\.all\.src_valid_mark=1|[[ $proto == -4 ]] \&\& [[ $(sysctl -n net.ipv4.conf.all.src_valid_mark) != 1 ]] \&\& cmd sysctl -q net.ipv4.conf.all.src_valid_mark=1|' \
+      amneziawg-tools/src/wg-quick/linux.bash
+
+FROM docker.io/library/alpine:3.22
+
+RUN apk add --no-cache \
+    bash \
     dumb-init \
-    iptables \
     ip6tables \
-    nftables \
-    kmod \
+    iproute2 \
+    iptables \
     iptables-legacy \
-    wireguard-go \
-    wireguard-tools && \
-    sed -i 's|\[\[ $proto == -4 \]\] && cmd sysctl -q net\.ipv4\.conf\.all\.src_valid_mark=1|[[ $proto == -4 ]] \&\& [[ $(sysctl -n net.ipv4.conf.all.src_valid_mark) != 1 ]] \&\& cmd sysctl -q net.ipv4.conf.all.src_valid_mark=1|' /usr/bin/wg-quick
+    kmod \
+    nftables \
+    openresolv && \
+    mkdir -p /etc/wireguard /etc/amnezia && \
+    ln -s /etc/wireguard /etc/amnezia/amneziawg && \
+    for dir in /usr/sbin /sbin; do \
+      if [ -x "$dir/iptables-legacy" ]; then \
+        ln -sf iptables-legacy "$dir/iptables"; \
+        ln -sf iptables-legacy-restore "$dir/iptables-restore"; \
+        ln -sf iptables-legacy-save "$dir/iptables-save"; \
+      fi; \
+      if [ -x "$dir/ip6tables-legacy" ]; then \
+        ln -sf ip6tables-legacy "$dir/ip6tables"; \
+        ln -sf ip6tables-legacy-restore "$dir/ip6tables-restore"; \
+        ln -sf ip6tables-legacy-save "$dir/ip6tables-save"; \
+      fi; \
+    done
 
-RUN mkdir -p /etc/amnezia
-RUN ln -s /etc/wireguard /etc/amnezia/amneziawg
+COPY --from=build /build/amneziawg-go/amneziawg-go /usr/bin/amneziawg-go
+COPY --from=build /build/amneziawg-tools/src/wg /usr/bin/awg
+COPY --from=build /build/amneziawg-tools/src/wg-quick/linux.bash /usr/bin/awg-quick
+COPY docker/awg-client-entrypoint.sh /usr/local/bin/awg-client-entrypoint
 
-# Use iptables-legacy
-RUN update-alternatives --install /usr/sbin/iptables iptables /usr/sbin/iptables-legacy 10 --slave /usr/sbin/iptables-restore iptables-restore /usr/sbin/iptables-legacy-restore --slave /usr/sbin/iptables-save iptables-save /usr/sbin/iptables-legacy-save
-RUN update-alternatives --install /usr/sbin/ip6tables ip6tables /usr/sbin/ip6tables-legacy 10 --slave /usr/sbin/ip6tables-restore ip6tables-restore /usr/sbin/ip6tables-legacy-restore --slave /usr/sbin/ip6tables-save ip6tables-save /usr/sbin/ip6tables-legacy-save
+RUN chmod +x /usr/bin/amneziawg-go /usr/bin/awg /usr/bin/awg-quick /usr/local/bin/awg-client-entrypoint
 
-# Set Environment
-ENV DEBUG=Server,WireGuard,Database,CMD,Firewall
-ENV PORT=51821
-ENV HOST=0.0.0.0
-ENV INSECURE=false
-ENV INIT_ENABLED=false
-ENV DISABLE_IPV6=false
+ENV AWG_CONFIG_DIR=/etc/wireguard
+
+HEALTHCHECK --interval=1m --timeout=5s --retries=3 CMD /usr/bin/timeout 5s /bin/sh -c "awg show | grep -q interface || exit 1"
 
 LABEL org.opencontainers.image.source=https://github.com/wg-easy/wg-easy
 
-# Run Web UI
-CMD ["/usr/bin/dumb-init", "node", "server/index.mjs"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["/usr/local/bin/awg-client-entrypoint"]

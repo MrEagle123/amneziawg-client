@@ -247,7 +247,6 @@ export function validateZod<T>(
           })
           .join('; ');
       }
-      // eslint-disable-next-line preserve-caught-error
       throw new Error(message);
     }
   };

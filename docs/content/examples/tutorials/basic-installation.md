@@ -2,7 +2,7 @@
 title: Basic Installation
 ---
 
-<!-- TODO: add docs for pihole, nginx, caddy, traefik -->
+<!-- TOOD: add docs for pihole, nginx, caddy, traefik -->
 
 ## Requirements
 

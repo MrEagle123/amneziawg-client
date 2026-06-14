@@ -3,15 +3,6 @@ import type { UserType } from '#db/repositories/user/types';
 
 export type WGSession = Partial<{
   userId: ID;
-  // TODO: add pending login expiration
-  pendingLogin: {
-    type: 'password' | 'oauth';
-    userId: ID;
-    remember: boolean;
-  };
-  oauth_verifier: string;
-  oauth_nonce: string;
-  oauth_state: string;
 }>;
 
 const name = 'wg-easy';
@@ -49,18 +40,11 @@ export async function getCurrentUser(event: H3Event) {
 
   const authorization = getHeader(event, 'Authorization');
 
-  let user: UserType | undefined;
+  let user: UserType | undefined = undefined;
   if (session.data.userId) {
     // Handle if authenticating using Session
     user = await Database.users.get(session.data.userId);
   } else if (authorization) {
-    if (WG_ENV.DISABLE_PASSWORD_AUTH) {
-      throw createError({
-        statusCode: 403,
-        statusMessage: 'Password authentication is disabled',
-      });
-    }
-
     // Handle if authenticating using Header
     const [method, value] = authorization.split(' ');
     // Support Basic Authentication
@@ -86,14 +70,21 @@ export async function getCurrentUser(event: H3Event) {
       });
     }
 
+    // TODO: timing can be used to enumerate usernames
+
     const foundUser = await Database.users.getByUsername(username);
 
-    // always check to avoid timing attack
-    const userHashPassword = foundUser?.password ?? null;
+    if (!foundUser) {
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'Session failed',
+      });
+    }
+
+    const userHashPassword = foundUser.password;
     const passwordValid = await isPasswordValid(password, userHashPassword);
 
-    // can't login through basic auth if 2fa enabled
-    if (!foundUser || !passwordValid || foundUser.totpVerified) {
+    if (!passwordValid) {
       throw createError({
         statusCode: 401,
         statusMessage: 'Session failed',

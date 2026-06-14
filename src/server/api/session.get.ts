@@ -1,7 +1,9 @@
+import type { SharedPublicUser } from '~~/shared/utils/permissions';
+
 export default defineEventHandler(async (event) => {
   const session = await useWGSession(event);
 
-  if (!session.data.userId || session.data.pendingLogin) {
+  if (!session.data.userId) {
     // not logged in
     throw createError({
       statusCode: 401,
@@ -16,12 +18,6 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'Not found in Database',
     });
   }
-  if (!user.enabled) {
-    throw createError({
-      statusCode: 403,
-      statusMessage: 'User is disabled',
-    });
-  }
 
   return {
     id: user.id,
@@ -30,7 +26,5 @@ export default defineEventHandler(async (event) => {
     name: user.name,
     email: user.email,
     totpVerified: user.totpVerified,
-    oauthProvider: user.oauthProvider,
-    hasPassword: user.password !== null,
   } satisfies SharedPublicUser;
 });
